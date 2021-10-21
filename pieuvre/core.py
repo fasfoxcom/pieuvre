@@ -9,6 +9,17 @@ import logging
 from functools import partial
 from typing import Union, Optional, List, Sequence
 
+from .constants import (
+    ON_ENTER_STATE_CHECK_DECORATOR,
+    ON_EXIT_STATE_CHECK_DECORATOR,
+    ON_ENTER_STATE_HOOK_DECORATOR,
+    ON_EXIT_STATE_HOOK_DECORATOR,
+    ON_ENTER_STATE_PREFIX,
+    ON_EXIT_STATE_PREFIX,
+    BEFORE_TRANSITION_PREFIX,
+    AFTER_TRANSITION_PREFIX,
+    CHECK_TRANSITION_PREFIX,
+)
 from .exceptions import (
     ForbiddenTransition,
     InvalidTransition,
@@ -25,16 +36,6 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
-
-ON_ENTER_STATE_PREFIX = "on_enter_"
-ON_EXIT_STATE_PREFIX = "on_exit_"
-AFTER_TRANSITION_PREFIX = "after_"
-BEFORE_TRANSITION_PREFIX = "before_"
-CHECK_TRANSITION_PREFIX = "check_"
-ON_ENTER_STATE_CHECK_DECORATOR = "_on_enter_state_check"
-ON_EXIT_STATE_CHECK_DECORATOR = "_on_exit_state_check"
-ON_ENTER_STATE_HOOK_DECORATOR = "_on_enter_state_hook"
-ON_EXIT_STATE_HOOK_DECORATOR = "_on_exit_state_hook"
 
 
 def update_decorated_functions(obj: dict, states, function):
