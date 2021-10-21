@@ -184,7 +184,7 @@ class Workflow:
         """
         return self._get_model_state()
 
-    def update_model_state(self, value):
+    def _update_model_state(self, value):
         """
         Update the state of the model
 
@@ -424,7 +424,7 @@ class Workflow:
         source = self._get_model_state()
 
         # Change state
-        self.update_model_state(transition["destination"])
+        self._update_model_state(transition["destination"])
 
         self._on_enter_state(transition)
 
@@ -481,7 +481,7 @@ class Workflow:
         return self.default_transition(name, *args, **kwargs)
 
     def rollback(self, current_state, target_state, exc):
-        self.update_model_state(current_state)
+        self._update_model_state(current_state)
 
     def get_all_transitions(self):
         """
@@ -578,9 +578,10 @@ class Workflow:
 
         raise TransitionNotFound(current_state=state, to_state=target_state)
 
-    def advance_workflow(self):
+    def _get_next_transition(self):
         """
-        Advance the workflow. The workflow must be unambiguous (a single transition must be possible).
+        Return the next transition that can be reached.
+        The workflow must be unambiguous (a single transition must be possible).
         """
         state = self._get_model_state()
         transitions = self.get_available_transitions(state, return_all=False)
@@ -588,7 +589,14 @@ class Workflow:
             raise TransitionUnavailable(current_state=state)
         elif len(transitions) > 1:
             raise TransitionAmbiguous(l=len(transitions))
-        getattr(self, transitions[0]["name"])()
+        return transitions[0]
+
+    def advance_workflow(self):
+        """
+        Advance the workflow.
+        """
+        transition = self._get_next_transition()
+        getattr(self, transition["name"])()
 
     def _log_db(self, transition, *args, **kwargs):
         """

@@ -119,7 +119,7 @@ class TestWorkflow(TestCase):
         self.assertEqual(self.workflow._get_model_state(), "draft")
 
     def test_update_model_state(self):
-        self.workflow.update_model_state("new_state")
+        self.workflow._update_model_state("new_state")
         self.assertEqual(self.model.state, "new_state")
 
     def test_check_state(self):
