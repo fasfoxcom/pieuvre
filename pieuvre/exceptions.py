@@ -51,6 +51,22 @@ class TransitionNotFound(WorkflowBaseError):
     message = "Transition not found from {current_state} to {to_state}"
 
 
+class TransitionUnavailable(WorkflowBaseError):
+    """
+    Raised when the workflow cannot automatically go forward.
+    """
+
+    message = "No transition available out of state {current_state}"
+
+
+class TransitionAmbiguous(WorkflowBaseError):
+    """
+    Raised when the workflow cannot determine which transitions to trigger.
+    """
+
+    message = "Multiple possible transitions (got {l} choices, expected 1)"
+
+
 class WorkflowValidationError(WorkflowBaseError):
     """
     Raised by the application when the transition fails

@@ -25,6 +25,8 @@ from .exceptions import (
     InvalidTransition,
     TransitionDoesNotExist,
     TransitionNotFound,
+    TransitionUnavailable,
+    TransitionAmbiguous,
 )
 
 try:
@@ -277,7 +279,7 @@ class Workflow:
         """
         return bool(cls._get_transition_by_name(name))
 
-    def finalize_transition(self, transition):
+    def _finalize_transition(self, transition):
         """
         Update the model state and save it.
         """
@@ -429,7 +431,7 @@ class Workflow:
         self._after_transition(transition, result)
 
         # save model
-        self.finalize_transition(transition)
+        self._finalize_transition(transition)
 
         # log in db
         # transition can be from a specific state or from a list of states or
@@ -463,6 +465,7 @@ class Workflow:
     def run_transition(self, name, *args, **kwargs):
         """
         Private method: perform the transition.
+        TBD: is this method really needed?
         """
 
         # Check transition
@@ -574,6 +577,18 @@ class Workflow:
             return getattr(self, potential_transition[0]["name"])
 
         raise TransitionNotFound(current_state=state, to_state=target_state)
+
+    def advance_workflow(self):
+        """
+        Advance the workflow. The workflow must be unambiguous (a single transition must be possible).
+        """
+        state = self._get_model_state()
+        transitions = self.get_available_transitions(state, return_all=False)
+        if not transitions:
+            raise TransitionUnavailable(current_state=state)
+        elif len(transitions) > 1:
+            raise TransitionAmbiguous(l=len(transitions))
+        getattr(self, transitions[0]["name"])()
 
     def _log_db(self, transition, *args, **kwargs):
         """

@@ -12,6 +12,7 @@ from pieuvre import (
     on_enter_state_check,
     on_exit_state_check,
 )
+from pieuvre.exceptions import TransitionAmbiguous, TransitionUnavailable
 
 
 class MyOrder(object):
@@ -104,6 +105,10 @@ class MyWorkflow(Workflow):
     def another_submitted_check(self):
         return True
 
+    def check_reject(self):
+        # Cannot reject twice
+        return self.model.state != "rejected"
+
 
 class TestWorkflow(TestCase):
     def setUp(self):
@@ -115,7 +120,6 @@ class TestWorkflow(TestCase):
 
     def test_update_model_state(self):
         self.workflow.update_model_state("new_state")
-
         self.assertEqual(self.model.state, "new_state")
 
     def test_check_state(self):
@@ -163,7 +167,7 @@ class TestWorkflow(TestCase):
 
     def test_finalize_transition(self):
         self.model.is_saved = False
-        self.workflow.finalize_transition(
+        self.workflow._finalize_transition(
             {"name": "submit", "source": "draft", "destination": "submitted"}
         )
 
@@ -234,9 +238,7 @@ class TestWorkflow(TestCase):
         )
 
         # check is valid
-        self.assertTrue(
-            self.workflow.check_transition_condition(transition_with_check)
-        )
+        self.assertTrue(self.workflow.check_transition_condition(transition_with_check))
 
         self.model.allow_submit = False
         with self.assertRaises(ForbiddenTransition) as e:
@@ -285,7 +287,11 @@ class TestWorkflow(TestCase):
         self.assertEqual(
             self.workflow.get_next_available_states(),
             [
-                {"state": "submitted", "transition": "submit", "transition_label": None},
+                {
+                    "state": "submitted",
+                    "transition": "submit",
+                    "transition_label": None,
+                },
                 {"state": "rejected", "transition": "reject", "transition_label": None},
             ],
         )
@@ -306,13 +312,33 @@ class TestWorkflow(TestCase):
         )
 
     def test_get_next_available_states_with_ignored_condition(self):
-        self.workflow.allow_entering_submitted_state = False
+        self.model.allow_entering_submitted_state = False
         # return_all is True by default, so all states should be returned even if the transition
         # is forbidden by the check
         self.assertEqual(
             self.workflow.get_next_available_states(),
             [
-                {"state": "submitted", "transition": "submit", "transition_label": None},
+                {
+                    "state": "submitted",
+                    "transition": "submit",
+                    "transition_label": None,
+                },
                 {"state": "rejected", "transition": "reject", "transition_label": None},
             ],
         )
+
+    def test_advance_workflow(self):
+        self.model.allow_entering_submitted_state = False
+        # Only allowed state is now "rejected"
+        self.workflow.advance_workflow()
+        self.assertEqual(self.model.state, "rejected")
+
+    def test_advance_workflow_ambiguous(self):
+        # Multiple available transitions
+        with self.assertRaises(TransitionAmbiguous):
+            self.workflow.advance_workflow()
+
+    def test_advance_workflow_unavailable(self):
+        self.model.state = "rejected"
+        with self.assertRaises(TransitionUnavailable):
+            self.workflow.advance_workflow()
