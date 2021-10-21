@@ -7,6 +7,7 @@ Base workflow implementation
 import logging
 
 from functools import partial
+from typing import Union, Optional, List, Sequence
 
 from .exceptions import (
     ForbiddenTransition,
@@ -30,9 +31,13 @@ ON_EXIT_STATE_PREFIX = "on_exit_"
 AFTER_TRANSITION_PREFIX = "after_"
 BEFORE_TRANSITION_PREFIX = "before_"
 CHECK_TRANSITION_PREFIX = "check_"
+ON_ENTER_STATE_CHECK_DECORATOR = "_on_enter_state_check"
+ON_EXIT_STATE_CHECK_DECORATOR = "_on_exit_state_check"
+ON_ENTER_STATE_HOOK_DECORATOR = "_on_enter_state_hook"
+ON_EXIT_STATE_HOOK_DECORATOR = "_on_exit_state_hook"
 
 
-def update_decorated_functions(obj, states, function):
+def update_decorated_functions(obj: dict, states, function):
     for state in states:
         if state in obj:
             obj[state].append(function)
@@ -115,10 +120,10 @@ class Workflow:
                 continue
 
             for deco in (
-                "_on_enter_state_check",
-                "_on_exit_state_check",
-                "_on_enter_state_hook",
-                "_on_exit_state_hook",
+                ON_ENTER_STATE_CHECK_DECORATOR,
+                ON_EXIT_STATE_CHECK_DECORATOR,
+                ON_ENTER_STATE_HOOK_DECORATOR,
+                ON_EXIT_STATE_HOOK_DECORATOR,
             ):
 
                 if hasattr(func, deco):
@@ -169,7 +174,7 @@ class Workflow:
     @property
     def state(self) -> str:
         """
-        Return the current workfow state.
+        Return the current workflow state.
 
         Returns:
             str: current workflow state
@@ -202,10 +207,10 @@ class Workflow:
         setattr(self.model, transition["date_field"], now())
 
     @classmethod
-    def _check_state(cls, source, state) -> bool:
+    def _check_state(cls, source: Union[List[str], str], state: str) -> bool:
         """
 
-        Check if the state of the model is compatible the provider source
+        Check if the state of the model is compatible the provided source
 
         Args:
             source (str or list): source state
@@ -232,7 +237,7 @@ class Workflow:
         """
 
         if self._check_state(transition["source"], self._get_model_state()):
-            return
+            return True
 
         raise InvalidTransition(
             transition=transition["name"],
@@ -352,12 +357,14 @@ class Workflow:
         after_transition(result)
 
     def _check_on_enter_state(self, state):
-        return all([func() for func in self._on_enter_state_check.get(state, [])])
+        return all(func() for func in self._on_enter_state_check.get(state, []))
 
     def _check_on_exit_state(self, state):
-        return all([func() for func in self._on_exit_state_check.get(state, [])])
+        return all(func() for func in self._on_exit_state_check.get(state, []))
 
-    def check_transition_condition(self, transition, *args, **kwargs):
+    def check_transition_condition(
+        self, transition, *args, raise_exceptions=True, **kwargs
+    ):
         """
         Check that the transition is allowed:
         * Call condition function.
@@ -383,13 +390,16 @@ class Workflow:
             and self._check_on_enter_state(transition["destination"])
             and self._check_on_exit_state(self._get_model_state())
         ):
-            return
+            return True
 
-        raise ForbiddenTransition(
-            transition=transition["name"],
-            current_state=self._get_model_state(),
-            to_state=transition["destination"],
-        )
+        if raise_exceptions:
+            raise ForbiddenTransition(
+                transition=transition["name"],
+                current_state=self._get_model_state(),
+                to_state=transition["destination"],
+            )
+
+        return False
 
     def pre_transition(self, name, *args, **kwargs):
         transition = self._get_transition_by_name(name)
@@ -478,13 +488,18 @@ class Workflow:
         """
         return self.transitions
 
-    def get_available_transitions(self, state=None):
+    def get_available_transitions(
+        self, state: Optional[str] = None, return_all: bool = True
+    ):
         """
         Get the list of available transitions from a given state,
         If no state is given, return available transitions from current state
 
         Args:
             state (str): optional: source state
+            return_all (bool): optional: return all transitions from the source state
+            and do not check if the transitions are valid (useful is provided state
+            is not the current state, as checks cannot be performed)
 
         Returns:
             list: list of transitions available from the given or current state
@@ -496,29 +511,47 @@ class Workflow:
             trans
             for trans in self.transitions
             if self._check_state(trans["source"], state)
+            and (
+                return_all
+                or self.check_transition_condition(trans, raise_exceptions=False)
+            )
         ]
 
-    def get_next_available_states(self, state=None):
+    def get_next_available_states(
+        self, state: Optional[str] = None, return_all: bool = True
+    ) -> Sequence[dict]:
         """
         Return the list of available next states from a given state
         If no state is given, the current state will be used
 
         Args:
             state (str): optional: source state
+            return_all (bool): optional: return all states and do not check if
+            the transitions to reach them are valid (useful is provided state
+            is not the current state, as checks cannot be performed)
 
         Returns:
-            list: list of states reachable from the given or current state
+            list: list of dictionaries. Each dictionary contains the name
+            of a state reachable from the given or current state ("state"),
+            the name of the transition ("transition") and the label
+            of the transition if it exists ("transition_label")
         """
         state = state or self._get_model_state()
 
         return [
-            {"state": trans["destination"], "label": trans.get("label")}
-            for trans in self.get_available_transitions(state)
+            {
+                "state": trans["destination"],
+                "transition": trans["name"],
+                "transition_label": trans.get("label"),
+            }
+            for trans in self.get_available_transitions(
+                state=state, return_all=return_all
+            )
         ]
 
-    def get_transition(self, target_state):
+    def get_transition(self, target_state: str) -> dict:
         """
-        Return which transition to call to get to the target state
+        Return the transition to call to get to the target state
 
         Args:
             target_state (str): state to reach
@@ -528,16 +561,16 @@ class Workflow:
             reach the desired state.
         """
         state = self._get_model_state()
+
         potential_transition = [
-            trans["name"]
-            for trans in self.transitions
+            trans
+            for trans in self.get_available_transitions(state=state)
             if trans["destination"] == target_state
-            and self._check_state(trans["source"], state)
         ]
 
         if potential_transition:
             # Return first transition
-            return getattr(self, potential_transition[0])
+            return getattr(self, potential_transition[0]["name"])
 
         raise TransitionNotFound(current_state=state, to_state=target_state)
 
@@ -663,7 +696,7 @@ class OnEnterStateCheck(BaseDecorator):
            # Transition is aborted if there is not enough fuel
     """
 
-    type = "_on_enter_state_check"
+    type = ON_ENTER_STATE_CHECK_DECORATOR
 
 
 class OnExitStateCheck(BaseDecorator):
@@ -683,7 +716,7 @@ class OnExitStateCheck(BaseDecorator):
            # Transition is aborted if the day is not the 7th
     """
 
-    type = "_on_exit_state_check"
+    type = ON_EXIT_STATE_CHECK_DECORATOR
 
 
 class OnEnterState(BaseDecorator):
@@ -700,7 +733,7 @@ class OnEnterState(BaseDecorator):
            print("Launch is imminent!")
     """
 
-    type = "_on_enter_state_hook"
+    type = ON_ENTER_STATE_HOOK_DECORATOR
 
 
 class OnExitState(BaseDecorator):
@@ -717,4 +750,4 @@ class OnExitState(BaseDecorator):
            print("Beware aliens, a rocket has left the launchpad!")
     """
 
-    type = "_on_exit_state_hook"
+    type = ON_EXIT_STATE_HOOK_DECORATOR

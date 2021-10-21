@@ -137,7 +137,7 @@ class TestWorkflow(TestCase):
             "destination": "completed",
         }
 
-        self.assertIsNone(self.workflow._pre_transition_check(valid_transition))
+        self.assertTrue(self.workflow._pre_transition_check(valid_transition))
 
         with self.assertRaises(InvalidTransition) as e:
             self.workflow._pre_transition_check(invalid_transition)
@@ -229,12 +229,12 @@ class TestWorkflow(TestCase):
             "destination": "completed",
         }
 
-        self.assertIsNone(
+        self.assertTrue(
             self.workflow.check_transition_condition(transition_without_check)
         )
 
         # check is valid
-        self.assertIsNone(
+        self.assertTrue(
             self.workflow.check_transition_condition(transition_with_check)
         )
 
@@ -269,7 +269,6 @@ class TestWorkflow(TestCase):
         self.assertEqual(self.model.state, "rejected")
 
     def test_log_db(self):
-
         pass
 
     def test_get_transition(self):
@@ -286,12 +285,34 @@ class TestWorkflow(TestCase):
         self.assertEqual(
             self.workflow.get_next_available_states(),
             [
-                {"state": "submitted", "label": None},
-                {"state": "rejected", "label": None},
+                {"state": "submitted", "transition": "submit", "transition_label": None},
+                {"state": "rejected", "transition": "reject", "transition_label": None},
             ],
         )
 
         self.assertEqual(
             self.workflow.get_next_available_states("completed"),
-            [{"state": "rejected", "label": None}],
+            [{"state": "rejected", "transition": "reject", "transition_label": None}],
+        )
+
+    def test_get_next_available_states_with_condition(self):
+        self.model.allow_entering_submitted_state = False
+        # submitted state should not appear because it is forbidden by the check method
+        self.assertEqual(
+            self.workflow.get_next_available_states(return_all=False),
+            [
+                {"state": "rejected", "transition": "reject", "transition_label": None},
+            ],
+        )
+
+    def test_get_next_available_states_with_ignored_condition(self):
+        self.workflow.allow_entering_submitted_state = False
+        # return_all is True by default, so all states should be returned even if the transition
+        # is forbidden by the check
+        self.assertEqual(
+            self.workflow.get_next_available_states(),
+            [
+                {"state": "submitted", "transition": "submit", "transition_label": None},
+                {"state": "rejected", "transition": "reject", "transition_label": None},
+            ],
         )
