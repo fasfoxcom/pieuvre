@@ -12,7 +12,7 @@ from .exceptions import (
     ForbiddenTransition,
     InvalidTransition,
     TransitionDoesNotExist,
-    TransitionNotFound
+    TransitionNotFound,
 )
 
 try:
@@ -37,7 +37,9 @@ def update_decorated_functions(obj, states, function):
         if state in obj:
             obj[state].append(function)
         else:
-            obj[state] = [function, ]
+            obj[state] = [
+                function,
+            ]
 
 
 class Workflow:
@@ -87,7 +89,8 @@ class Workflow:
         self.model = model
         self._check_initial_state()
         self.event_managers = [
-            klass(model) for klass in self._get_event_manager_classes()]
+            klass(model) for klass in self._get_event_manager_classes()
+        ]
 
         super().__init__()
 
@@ -111,14 +114,17 @@ class Workflow:
             if not callable(func):
                 continue
 
-            for deco in ("_on_enter_state_check", "_on_exit_state_check",
-                         "_on_enter_state_hook", "_on_exit_state_hook"):
+            for deco in (
+                "_on_enter_state_check",
+                "_on_exit_state_check",
+                "_on_enter_state_hook",
+                "_on_exit_state_hook",
+            ):
 
                 if hasattr(func, deco):
                     update_decorated_functions(
-                        getattr(self, deco),
-                        getattr(func, deco),
-                        func)
+                        getattr(self, deco), getattr(func, deco), func
+                    )
 
     def process_event(self, name, data):
         """
@@ -177,8 +183,7 @@ class Workflow:
         Args:
             value (str): new state value
         """
-        logger.debug("Updating model {} to {}".format(
-            self.state_field_name, value))
+        logger.debug("Updating model {} to {}".format(self.state_field_name, value))
 
         setattr(self.model, self.state_field_name, value)
 
@@ -232,7 +237,7 @@ class Workflow:
         raise InvalidTransition(
             transition=transition["name"],
             current_state=self._get_model_state(),
-            to_state=transition["destination"]
+            to_state=transition["destination"],
         )
 
     @classmethod
@@ -249,8 +254,7 @@ class Workflow:
                   the transition does not exist.
         """
         try:
-            return next(trans for trans in cls.transitions
-                        if trans["name"] == name)
+            return next(trans for trans in cls.transitions if trans["name"] == name)
         except StopIteration:
             return {}
 
@@ -286,8 +290,9 @@ class Workflow:
         """
         state = transition["destination"]
         functions = self._on_enter_state_hook.get(state, [])
-        _on_enter_state = getattr(self, "{}{}".format(
-            ON_ENTER_STATE_PREFIX, state), None)
+        _on_enter_state = getattr(
+            self, "{}{}".format(ON_ENTER_STATE_PREFIX, state), None
+        )
 
         if _on_enter_state:
             functions.append(_on_enter_state)
@@ -305,8 +310,7 @@ class Workflow:
         """
         state = self._get_model_state()
         functions = self._on_exit_state_hook.get(state, [])
-        _on_exit_state = getattr(self, "{}{}".format(
-            ON_EXIT_STATE_PREFIX, state), None)
+        _on_exit_state = getattr(self, "{}{}".format(ON_EXIT_STATE_PREFIX, state), None)
         if _on_exit_state:
             functions.append(_on_exit_state)
 
@@ -322,8 +326,9 @@ class Workflow:
             transition (dict): the transition to enter
         """
 
-        before_transition = getattr(self, "{}{}".format(
-            BEFORE_TRANSITION_PREFIX, transition["name"]), None)
+        before_transition = getattr(
+            self, "{}{}".format(BEFORE_TRANSITION_PREFIX, transition["name"]), None
+        )
         if not before_transition:
             return
 
@@ -337,8 +342,9 @@ class Workflow:
         Args:
             transition (dict): the transition to enter
         """
-        after_transition = getattr(self, "{}{}".format(
-            AFTER_TRANSITION_PREFIX, transition["name"]), None)
+        after_transition = getattr(
+            self, "{}{}".format(AFTER_TRANSITION_PREFIX, transition["name"]), None
+        )
         if not after_transition:
             return
 
@@ -346,12 +352,10 @@ class Workflow:
         after_transition(result)
 
     def _check_on_enter_state(self, state):
-        return all([func() for func in self._on_enter_state_check.get(
-            state, [])])
+        return all([func() for func in self._on_enter_state_check.get(state, [])])
 
     def _check_on_exit_state(self, state):
-        return all([func() for func in self._on_exit_state_check.get(
-            state, [])])
+        return all([func() for func in self._on_exit_state_check.get(state, [])])
 
     def check_transition_condition(self, transition, *args, **kwargs):
         """
@@ -367,21 +371,24 @@ class Workflow:
             ForbiddenTransition: if the transition is forbidden
         """
         valid_transition = True
-        check_transition_function = getattr(self, "{}{}".format(
-            CHECK_TRANSITION_PREFIX, transition["name"]), None)
+        check_transition_function = getattr(
+            self, "{}{}".format(CHECK_TRANSITION_PREFIX, transition["name"]), None
+        )
 
         if check_transition_function and not check_transition_function(*args, **kwargs):
             valid_transition = False
 
-        if valid_transition \
-                and self._check_on_enter_state(transition["destination"]) \
-                and self._check_on_exit_state(self._get_model_state()):
+        if (
+            valid_transition
+            and self._check_on_enter_state(transition["destination"])
+            and self._check_on_exit_state(self._get_model_state())
+        ):
             return
 
         raise ForbiddenTransition(
             transition=transition["name"],
             current_state=self._get_model_state(),
-            to_state=transition["destination"]
+            to_state=transition["destination"],
         )
 
     def pre_transition(self, name, *args, **kwargs):
@@ -449,9 +456,7 @@ class Workflow:
 
         # Check transition
         if not self.is_transition(name):
-            raise TransitionDoesNotExist(
-                transition=name
-            )
+            raise TransitionDoesNotExist(transition=name)
 
         # TODO: handle the case when the names of the transition and
         # the method are different
@@ -487,8 +492,11 @@ class Workflow:
 
         state = state or self._get_model_state()
 
-        return [trans for trans in self.transitions if self._check_state(
-            trans["source"], state)]
+        return [
+            trans
+            for trans in self.transitions
+            if self._check_state(trans["source"], state)
+        ]
 
     def get_next_available_states(self, state=None):
         """
@@ -504,10 +512,8 @@ class Workflow:
         state = state or self._get_model_state()
 
         return [
-            {
-                "state": trans["destination"],
-                "label": trans.get("label")
-            } for trans in self.get_available_transitions(state)
+            {"state": trans["destination"], "label": trans.get("label")}
+            for trans in self.get_available_transitions(state)
         ]
 
     def get_transition(self, target_state):
@@ -523,9 +529,11 @@ class Workflow:
         """
         state = self._get_model_state()
         potential_transition = [
-            trans["name"] for trans in self.transitions if trans["destination"] == target_state and
-            self._check_state(trans["source"], state)
-            ]
+            trans["name"]
+            for trans in self.transitions
+            if trans["destination"] == target_state
+            and self._check_state(trans["source"], state)
+        ]
 
         if potential_transition:
             # Return first transition
@@ -543,17 +551,14 @@ class Workflow:
         if not self.db_logging:
             return
 
-        params = {
-            "args": args,
-            "kwargs": kwargs
-        }
+        params = {"args": args, "kwargs": kwargs}
 
         self.db_logging_class.log(
             transition=transition["name"],
             from_state=transition["source"],
             to_state=transition["destination"],
             model=self.model,
-            params=params
+            params=params,
         )
 
     def create_events(self, transition):
@@ -594,10 +599,8 @@ class Workflow:
             for source in sources:
                 is_empty = False
                 edge = pydot.Edge(
-                    source,
-                    trans["destination"],
-                    label=trans["name"],
-                    **edges_conf)
+                    source, trans["destination"], label=trans["name"], **edges_conf
+                )
                 graph.add_edge(edge)
 
         if not is_empty:
@@ -608,6 +611,7 @@ class Transition:
     """
     @transition decorator.
     """
+
     def __call__(self, func):
         #  TODO: Check if it is a valid transition
         @transaction.atomic
@@ -624,10 +628,17 @@ class BaseDecorator:
     """
     Base class for hook decorators.
     """
+
     type = None
 
     def __init__(self, state):
-        self.states = state if isinstance(state, list) else [state, ]
+        self.states = (
+            state
+            if isinstance(state, list)
+            else [
+                state,
+            ]
+        )
         super().__init__()
 
     def __call__(self, func):
@@ -651,6 +662,7 @@ class OnEnterStateCheck(BaseDecorator):
                return True
            # Transition is aborted if there is not enough fuel
     """
+
     type = "_on_enter_state_check"
 
 
@@ -670,6 +682,7 @@ class OnExitStateCheck(BaseDecorator):
                 return True
            # Transition is aborted if the day is not the 7th
     """
+
     type = "_on_exit_state_check"
 
 
@@ -686,6 +699,7 @@ class OnEnterState(BaseDecorator):
        def start_countdown(self, result):
            print("Launch is imminent!")
     """
+
     type = "_on_enter_state_hook"
 
 
@@ -702,4 +716,5 @@ class OnExitState(BaseDecorator):
        def warn_aliens(self, result):
            print("Beware aliens, a rocket has left the launchpad!")
     """
+
     type = "_on_exit_state_hook"

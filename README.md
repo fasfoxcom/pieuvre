@@ -72,18 +72,18 @@ class Rocket(WorkflowEnabled, models.Model):
 
 class RocketWorkflow(Workflow):
 	states = ROCKET_STATES
-	transitions = {
-		[
+	transitions = [
+		{
 			"source": ROCKET_STATES.IN_FACTORY,
 			"destination": ROCKET_STATES.ON_LAUNCHPAD,
 			"name": "prepare_for_launch"
-		],
-		[
+		},
+		{
 			"source": ROCKET_STATES.ON_LAUNCHPAD,
 			"destination": ROCKET_STATES.IN_SPACE,
 			"name": "launch"
-		]
-	}
+		}
+	]
 
 	def _refill(self):
 		self.fuel += 1000
