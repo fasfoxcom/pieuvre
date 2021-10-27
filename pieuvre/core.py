@@ -85,6 +85,13 @@ class Workflow:
     transitions = []
     db_logging = False
     db_logging_class = None
+    enabled_hooks_and_checks = (
+        ON_ENTER_STATE_CHECK_DECORATOR,
+        ON_EXIT_STATE_CHECK_DECORATOR,
+        ON_ENTER_STATE_HOOK_DECORATOR,
+        ON_EXIT_STATE_HOOK_DECORATOR,
+    )
+    extra_enabled_hooks_and_checks = ()
 
     events = {
         # "name": "method name"
@@ -102,12 +109,17 @@ class Workflow:
 
         super().__init__()
 
-        self._on_enter_state_check = {}
-        self._on_exit_state_check = {}
-        self._on_enter_state_hook = {}
-        self._on_exit_state_hook = {}
-
+        self._init_hooks()
         self._gather_decorated_functions()
+
+    @property
+    def hooks_and_checks(self):
+        return self.extra_enabled_hooks_and_checks + self.enabled_hooks_and_checks
+
+    def _init_hooks(self):
+
+        for deco in self.hooks_and_checks:
+            setattr(self, deco, {})
 
     def _gather_decorated_functions(self):
         """
@@ -122,12 +134,7 @@ class Workflow:
             if not callable(func):
                 continue
 
-            for deco in (
-                ON_ENTER_STATE_CHECK_DECORATOR,
-                ON_EXIT_STATE_CHECK_DECORATOR,
-                ON_ENTER_STATE_HOOK_DECORATOR,
-                ON_EXIT_STATE_HOOK_DECORATOR,
-            ):
+            for deco in self.hooks_and_checks:
 
                 if hasattr(func, deco):
                     update_decorated_functions(
