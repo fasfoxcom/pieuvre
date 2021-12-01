@@ -112,6 +112,21 @@ class Workflow:
         self._init_hooks()
         self._gather_decorated_functions()
 
+    @classmethod
+    def get_initial_state(cls):
+        """
+        Return the name of the initial state, with support for Django-Extended-Choices
+        """
+        initial_state = getattr(cls, "initial_state", None)
+        if not initial_state:
+            if hasattr(cls.states, "entries"):
+                # Django Extended choices
+                initial_state = cls.states.entries[0].value
+            else:
+                # Regular string list
+                initial_state = cls.states[0]
+        return initial_state
+
     @property
     def hooks_and_checks(self):
         return self.extra_enabled_hooks_and_checks + self.enabled_hooks_and_checks

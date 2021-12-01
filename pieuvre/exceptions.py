@@ -80,3 +80,11 @@ class WorkflowValidationError(WorkflowBaseError):
 
     def get_errors(self):
         return self.errors or []
+
+
+class CircularWorkflowError(WorkflowBaseError):
+    """
+    Raised when trying to advance a workflow that is circular
+    """
+
+    message = "Cannot advance circular workflow (infinite loop)"
