@@ -543,6 +543,23 @@ class Workflow:
             )
         ]
 
+
+    def get_available_transition(
+        self, transition_name: str, state: Optional[str] = None
+    ):
+        """
+        Get a transition by name from a given state if it is available.
+        If no state is given, return available transitions from current state
+
+        Args:
+            transition_name (str): transition name
+            state (str): optional: source state
+
+        Returns:
+            dict: the transition
+        """
+        return next((t for t in self.get_available_transitions(state) if t["name"] == transition_name), None)
+
     def get_next_available_states(
         self, state: Optional[str] = None, return_all: bool = True
     ) -> Sequence[dict]:
