@@ -16,11 +16,7 @@ extras_require = {
         "sphinx-rtd-theme",
         "sphinxcontrib-websupport",
     ],
-    "test": [
-        "pycodestyle",
-        "pytest==5.3.5",
-        "pytest-cov"
-    ]
+    "test": ["pycodestyle", "pytest==5.3.5", "pytest-cov"],
 }
 
 
@@ -48,11 +44,10 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
     packages=find_packages(exclude=("tests", "docs")),
-    install_requires=[
-    ],
+    install_requires=[],
     setup_requires=["wheel"],
     test_suite="tests",
     tests_require=extras_require["test"],
     extras_require=extras_require,
-    python_requires=">=3.5"
+    python_requires=">=3.5",
 )

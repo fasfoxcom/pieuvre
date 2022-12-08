@@ -543,7 +543,6 @@ class Workflow:
             )
         ]
 
-
     def get_available_transition(
         self, transition_name: str, state: Optional[str] = None
     ):
@@ -558,7 +557,14 @@ class Workflow:
         Returns:
             dict: the transition
         """
-        return next((t for t in self.get_available_transitions(state) if t["name"] == transition_name), None)
+        return next(
+            (
+                t
+                for t in self.get_available_transitions(state, return_all=False)
+                if t["name"] == transition_name
+            ),
+            None,
+        )
 
     def get_next_available_states(
         self, state: Optional[str] = None, return_all: bool = True
