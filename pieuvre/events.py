@@ -23,9 +23,8 @@ class WorkflowEventManager:
        }
 
     """
-    supported_transitions = {
 
-    }
+    supported_transitions = {}
 
     def __init__(self, model):
         self.model = model
@@ -50,7 +49,7 @@ class WorkflowEventManager:
         """
         return {
             "type": self.supported_transitions[transition_name]["event_type"],
-            "data": self.supported_transitions.get(transition_name, dict())()
+            "data": self.supported_transitions.get(transition_name, dict())(),
         }
 
     def _push_event(self, event):

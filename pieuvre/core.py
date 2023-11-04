@@ -7,12 +7,26 @@ Base workflow implementation
 import logging
 
 from functools import partial
+from typing import Union, Optional, List, Sequence
 
+from .constants import (
+    ON_ENTER_STATE_CHECK_DECORATOR,
+    ON_EXIT_STATE_CHECK_DECORATOR,
+    ON_ENTER_STATE_HOOK_DECORATOR,
+    ON_EXIT_STATE_HOOK_DECORATOR,
+    ON_ENTER_STATE_PREFIX,
+    ON_EXIT_STATE_PREFIX,
+    BEFORE_TRANSITION_PREFIX,
+    AFTER_TRANSITION_PREFIX,
+    CHECK_TRANSITION_PREFIX,
+)
 from .exceptions import (
     ForbiddenTransition,
     InvalidTransition,
     TransitionDoesNotExist,
-    TransitionNotFound
+    TransitionNotFound,
+    TransitionUnavailable,
+    TransitionAmbiguous,
 )
 
 try:
@@ -25,19 +39,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-ON_ENTER_STATE_PREFIX = "on_enter_"
-ON_EXIT_STATE_PREFIX = "on_exit_"
-AFTER_TRANSITION_PREFIX = "after_"
-BEFORE_TRANSITION_PREFIX = "before_"
-CHECK_TRANSITION_PREFIX = "check_"
 
-
-def update_decorated_functions(obj, states, function):
+def update_decorated_functions(obj: dict, states, function):
     for state in states:
         if state in obj:
             obj[state].append(function)
         else:
-            obj[state] = [function, ]
+            obj[state] = [
+                function,
+            ]
 
 
 class Workflow:
@@ -75,6 +85,13 @@ class Workflow:
     transitions = []
     db_logging = False
     db_logging_class = None
+    enabled_hooks_and_checks = (
+        ON_ENTER_STATE_CHECK_DECORATOR,
+        ON_EXIT_STATE_CHECK_DECORATOR,
+        ON_ENTER_STATE_HOOK_DECORATOR,
+        ON_EXIT_STATE_HOOK_DECORATOR,
+    )
+    extra_enabled_hooks_and_checks = ()
 
     events = {
         # "name": "method name"
@@ -87,16 +104,37 @@ class Workflow:
         self.model = model
         self._check_initial_state()
         self.event_managers = [
-            klass(model) for klass in self._get_event_manager_classes()]
+            klass(model) for klass in self._get_event_manager_classes()
+        ]
 
         super().__init__()
 
-        self._on_enter_state_check = {}
-        self._on_exit_state_check = {}
-        self._on_enter_state_hook = {}
-        self._on_exit_state_hook = {}
-
+        self._init_hooks()
         self._gather_decorated_functions()
+
+    @classmethod
+    def get_initial_state(cls):
+        """
+        Return the name of the initial state, with support for Django-Extended-Choices
+        """
+        initial_state = getattr(cls, "initial_state", None)
+        if not initial_state:
+            if hasattr(cls.states, "entries"):
+                # Django Extended choices
+                initial_state = cls.states.entries[0].value
+            else:
+                # Regular string list
+                initial_state = cls.states[0]
+        return initial_state
+
+    @property
+    def hooks_and_checks(self):
+        return self.extra_enabled_hooks_and_checks + self.enabled_hooks_and_checks
+
+    def _init_hooks(self):
+
+        for deco in self.hooks_and_checks:
+            setattr(self, deco, {})
 
     def _gather_decorated_functions(self):
         """
@@ -111,14 +149,12 @@ class Workflow:
             if not callable(func):
                 continue
 
-            for deco in ("_on_enter_state_check", "_on_exit_state_check",
-                         "_on_enter_state_hook", "_on_exit_state_hook"):
+            for deco in self.hooks_and_checks:
 
                 if hasattr(func, deco):
                     update_decorated_functions(
-                        getattr(self, deco),
-                        getattr(func, deco),
-                        func)
+                        getattr(self, deco), getattr(func, deco), func
+                    )
 
     def process_event(self, name, data):
         """
@@ -163,22 +199,21 @@ class Workflow:
     @property
     def state(self) -> str:
         """
-        Return the current workfow state.
+        Return the current workflow state.
 
         Returns:
             str: current workflow state
         """
         return self._get_model_state()
 
-    def update_model_state(self, value):
+    def _update_model_state(self, value):
         """
         Update the state of the model
 
         Args:
             value (str): new state value
         """
-        logger.debug("Updating model {} to {}".format(
-            self.state_field_name, value))
+        logger.debug("Updating model {} to {}".format(self.state_field_name, value))
 
         setattr(self.model, self.state_field_name, value)
 
@@ -197,10 +232,10 @@ class Workflow:
         setattr(self.model, transition["date_field"], now())
 
     @classmethod
-    def _check_state(cls, source, state) -> bool:
+    def _check_state(cls, source: Union[List[str], str], state: str) -> bool:
         """
 
-        Check if the state of the model is compatible the provider source
+        Check if the state of the model is compatible the provided source
 
         Args:
             source (str or list): source state
@@ -227,12 +262,12 @@ class Workflow:
         """
 
         if self._check_state(transition["source"], self._get_model_state()):
-            return
+            return True
 
         raise InvalidTransition(
             transition=transition["name"],
             current_state=self._get_model_state(),
-            to_state=transition["destination"]
+            to_state=transition["destination"],
         )
 
     @classmethod
@@ -249,8 +284,7 @@ class Workflow:
                   the transition does not exist.
         """
         try:
-            return next(trans for trans in cls.transitions
-                        if trans["name"] == name)
+            return next(trans for trans in cls.transitions if trans["name"] == name)
         except StopIteration:
             return {}
 
@@ -267,7 +301,7 @@ class Workflow:
         """
         return bool(cls._get_transition_by_name(name))
 
-    def finalize_transition(self, transition):
+    def _finalize_transition(self, transition):
         """
         Update the model state and save it.
         """
@@ -286,8 +320,9 @@ class Workflow:
         """
         state = transition["destination"]
         functions = self._on_enter_state_hook.get(state, [])
-        _on_enter_state = getattr(self, "{}{}".format(
-            ON_ENTER_STATE_PREFIX, state), None)
+        _on_enter_state = getattr(
+            self, "{}{}".format(ON_ENTER_STATE_PREFIX, state), None
+        )
 
         if _on_enter_state:
             functions.append(_on_enter_state)
@@ -305,8 +340,7 @@ class Workflow:
         """
         state = self._get_model_state()
         functions = self._on_exit_state_hook.get(state, [])
-        _on_exit_state = getattr(self, "{}{}".format(
-            ON_EXIT_STATE_PREFIX, state), None)
+        _on_exit_state = getattr(self, "{}{}".format(ON_EXIT_STATE_PREFIX, state), None)
         if _on_exit_state:
             functions.append(_on_exit_state)
 
@@ -322,8 +356,9 @@ class Workflow:
             transition (dict): the transition to enter
         """
 
-        before_transition = getattr(self, "{}{}".format(
-            BEFORE_TRANSITION_PREFIX, transition["name"]), None)
+        before_transition = getattr(
+            self, "{}{}".format(BEFORE_TRANSITION_PREFIX, transition["name"]), None
+        )
         if not before_transition:
             return
 
@@ -337,8 +372,9 @@ class Workflow:
         Args:
             transition (dict): the transition to enter
         """
-        after_transition = getattr(self, "{}{}".format(
-            AFTER_TRANSITION_PREFIX, transition["name"]), None)
+        after_transition = getattr(
+            self, "{}{}".format(AFTER_TRANSITION_PREFIX, transition["name"]), None
+        )
         if not after_transition:
             return
 
@@ -346,14 +382,14 @@ class Workflow:
         after_transition(result)
 
     def _check_on_enter_state(self, state):
-        return all([func() for func in self._on_enter_state_check.get(
-            state, [])])
+        return all(func() for func in self._on_enter_state_check.get(state, []))
 
     def _check_on_exit_state(self, state):
-        return all([func() for func in self._on_exit_state_check.get(
-            state, [])])
+        return all(func() for func in self._on_exit_state_check.get(state, []))
 
-    def check_transition_condition(self, transition, *args, **kwargs):
+    def check_transition_condition(
+        self, transition, *args, raise_exceptions=True, **kwargs
+    ):
         """
         Check that the transition is allowed:
         * Call condition function.
@@ -367,22 +403,28 @@ class Workflow:
             ForbiddenTransition: if the transition is forbidden
         """
         valid_transition = True
-        check_transition_function = getattr(self, "{}{}".format(
-            CHECK_TRANSITION_PREFIX, transition["name"]), None)
+        check_transition_function = getattr(
+            self, "{}{}".format(CHECK_TRANSITION_PREFIX, transition["name"]), None
+        )
 
         if check_transition_function and not check_transition_function(*args, **kwargs):
             valid_transition = False
 
-        if valid_transition \
-                and self._check_on_enter_state(transition["destination"]) \
-                and self._check_on_exit_state(self._get_model_state()):
-            return
+        if (
+            valid_transition
+            and self._check_on_enter_state(transition["destination"])
+            and self._check_on_exit_state(self._get_model_state())
+        ):
+            return True
 
-        raise ForbiddenTransition(
-            transition=transition["name"],
-            current_state=self._get_model_state(),
-            to_state=transition["destination"]
-        )
+        if raise_exceptions:
+            raise ForbiddenTransition(
+                transition=transition["name"],
+                current_state=self._get_model_state(),
+                to_state=transition["destination"],
+            )
+
+        return False
 
     def pre_transition(self, name, *args, **kwargs):
         transition = self._get_transition_by_name(name)
@@ -404,14 +446,14 @@ class Workflow:
         source = self._get_model_state()
 
         # Change state
-        self.update_model_state(transition["destination"])
+        self._update_model_state(transition["destination"])
 
         self._on_enter_state(transition)
 
         self._after_transition(transition, result)
 
         # save model
-        self.finalize_transition(transition)
+        self._finalize_transition(transition)
 
         # log in db
         # transition can be from a specific state or from a list of states or
@@ -445,13 +487,12 @@ class Workflow:
     def run_transition(self, name, *args, **kwargs):
         """
         Private method: perform the transition.
+        TBD: is this method really needed?
         """
 
         # Check transition
         if not self.is_transition(name):
-            raise TransitionDoesNotExist(
-                transition=name
-            )
+            raise TransitionDoesNotExist(transition=name)
 
         # TODO: handle the case when the names of the transition and
         # the method are different
@@ -462,7 +503,7 @@ class Workflow:
         return self.default_transition(name, *args, **kwargs)
 
     def rollback(self, current_state, target_state, exc):
-        self.update_model_state(current_state)
+        self._update_model_state(current_state)
 
     def get_all_transitions(self):
         """
@@ -473,13 +514,18 @@ class Workflow:
         """
         return self.transitions
 
-    def get_available_transitions(self, state=None):
+    def get_available_transitions(
+        self, state: Optional[str] = None, return_all: bool = True
+    ):
         """
         Get the list of available transitions from a given state,
         If no state is given, return available transitions from current state
 
         Args:
             state (str): optional: source state
+            return_all (bool): optional: return all transitions from the source state
+            and do not check if the transitions are valid (useful is provided state
+            is not the current state, as checks cannot be performed)
 
         Returns:
             list: list of transitions available from the given or current state
@@ -487,32 +533,74 @@ class Workflow:
 
         state = state or self._get_model_state()
 
-        return [trans for trans in self.transitions if self._check_state(
-            trans["source"], state)]
+        return [
+            trans
+            for trans in self.transitions
+            if self._check_state(trans["source"], state)
+            and (
+                return_all
+                or self.check_transition_condition(trans, raise_exceptions=False)
+            )
+        ]
 
-    def get_next_available_states(self, state=None):
+    def get_available_transition(
+        self, transition_name: str, state: Optional[str] = None
+    ):
+        """
+        Get a transition by name from a given state if it is available.
+        If no state is given, return available transitions from current state
+
+        Args:
+            transition_name (str): transition name
+            state (str): optional: source state
+
+        Returns:
+            dict: the transition
+        """
+        return next(
+            (
+                t
+                for t in self.get_available_transitions(state, return_all=False)
+                if t["name"] == transition_name
+            ),
+            None,
+        )
+
+    def get_next_available_states(
+        self, state: Optional[str] = None, return_all: bool = True
+    ) -> Sequence[dict]:
         """
         Return the list of available next states from a given state
         If no state is given, the current state will be used
 
         Args:
             state (str): optional: source state
+            return_all (bool): optional: return all states and do not check if
+            the transitions to reach them are valid (useful is provided state
+            is not the current state, as checks cannot be performed)
 
         Returns:
-            list: list of states reachable from the given or current state
+            list: list of dictionaries. Each dictionary contains the name
+            of a state reachable from the given or current state ("state"),
+            the name of the transition ("transition") and the label
+            of the transition if it exists ("transition_label")
         """
         state = state or self._get_model_state()
 
         return [
             {
                 "state": trans["destination"],
-                "label": trans.get("label")
-            } for trans in self.get_available_transitions(state)
+                "transition": trans["name"],
+                "transition_label": trans.get("label"),
+            }
+            for trans in self.get_available_transitions(
+                state=state, return_all=return_all
+            )
         ]
 
-    def get_transition(self, target_state):
+    def get_transition(self, target_state: str) -> dict:
         """
-        Return which transition to call to get to the target state
+        Return the transition to call to get to the target state
 
         Args:
             target_state (str): state to reach
@@ -522,16 +610,38 @@ class Workflow:
             reach the desired state.
         """
         state = self._get_model_state()
+
         potential_transition = [
-            trans["name"] for trans in self.transitions if trans["destination"] == target_state and
-            self._check_state(trans["source"], state)
-            ]
+            trans
+            for trans in self.get_available_transitions(state=state)
+            if trans["destination"] == target_state
+        ]
 
         if potential_transition:
             # Return first transition
-            return getattr(self, potential_transition[0])
+            return getattr(self, potential_transition[0]["name"])
 
         raise TransitionNotFound(current_state=state, to_state=target_state)
+
+    def _get_next_transition(self):
+        """
+        Return the next transition that can be reached.
+        The workflow must be unambiguous (a single transition must be possible).
+        """
+        state = self._get_model_state()
+        transitions = self.get_available_transitions(state, return_all=False)
+        if not transitions:
+            raise TransitionUnavailable(current_state=state)
+        elif len(transitions) > 1:
+            raise TransitionAmbiguous(l=len(transitions))
+        return transitions[0]
+
+    def advance_workflow(self):
+        """
+        Advance the workflow.
+        """
+        transition = self._get_next_transition()
+        getattr(self, transition["name"])()
 
     def _log_db(self, transition, *args, **kwargs):
         """
@@ -543,17 +653,14 @@ class Workflow:
         if not self.db_logging:
             return
 
-        params = {
-            "args": args,
-            "kwargs": kwargs
-        }
+        params = {"args": args, "kwargs": kwargs}
 
         self.db_logging_class.log(
             transition=transition["name"],
             from_state=transition["source"],
             to_state=transition["destination"],
             model=self.model,
-            params=params
+            params=params,
         )
 
     def create_events(self, transition):
@@ -594,10 +701,8 @@ class Workflow:
             for source in sources:
                 is_empty = False
                 edge = pydot.Edge(
-                    source,
-                    trans["destination"],
-                    label=trans["name"],
-                    **edges_conf)
+                    source, trans["destination"], label=trans["name"], **edges_conf
+                )
                 graph.add_edge(edge)
 
         if not is_empty:
@@ -608,6 +713,7 @@ class Transition:
     """
     @transition decorator.
     """
+
     def __call__(self, func):
         #  TODO: Check if it is a valid transition
         @transaction.atomic
@@ -624,10 +730,17 @@ class BaseDecorator:
     """
     Base class for hook decorators.
     """
+
     type = None
 
     def __init__(self, state):
-        self.states = state if isinstance(state, list) else [state, ]
+        self.states = (
+            state
+            if isinstance(state, list)
+            else [
+                state,
+            ]
+        )
         super().__init__()
 
     def __call__(self, func):
@@ -651,7 +764,8 @@ class OnEnterStateCheck(BaseDecorator):
                return True
            # Transition is aborted if there is not enough fuel
     """
-    type = "_on_enter_state_check"
+
+    type = ON_ENTER_STATE_CHECK_DECORATOR
 
 
 class OnExitStateCheck(BaseDecorator):
@@ -670,7 +784,8 @@ class OnExitStateCheck(BaseDecorator):
                 return True
            # Transition is aborted if the day is not the 7th
     """
-    type = "_on_exit_state_check"
+
+    type = ON_EXIT_STATE_CHECK_DECORATOR
 
 
 class OnEnterState(BaseDecorator):
@@ -686,7 +801,8 @@ class OnEnterState(BaseDecorator):
        def start_countdown(self, result):
            print("Launch is imminent!")
     """
-    type = "_on_enter_state_hook"
+
+    type = ON_ENTER_STATE_HOOK_DECORATOR
 
 
 class OnExitState(BaseDecorator):
@@ -702,4 +818,5 @@ class OnExitState(BaseDecorator):
        def warn_aliens(self, result):
            print("Beware aliens, a rocket has left the launchpad!")
     """
-    type = "_on_exit_state_hook"
+
+    type = ON_EXIT_STATE_HOOK_DECORATOR
